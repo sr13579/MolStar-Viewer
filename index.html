@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Molstar Viewer</title>
+    <link rel="stylesheet" type="text/css" href="./molstar.min.css" />
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+        #app {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        #molstar-container {
+            width: 100%;
+            flex-grow: 1;
+            position: relative;
+        }
+        .controls {
+            padding: 10px;
+            background: #e0e0e0;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        #status {
+            margin-left: auto;
+            color: #666;
+            font-style: italic;
+        }
+        .error {
+            color: red !important;
+        }
+        .success {
+            color: green !important;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div class="controls">
+            <button id="load-example">Load Example Structure</button>
+            <button id="load-pdb">Load from PDB (1CRN)</button>
+            <input type="file" id="file-input" accept=".pdb,.cif,.mmcif">
+            <div id="status">Initializing...</div>
+        </div>
+        <div id="molstar-container"></div>
+    </div>
+
+    <script>
+        let viewer;
+        
+        // Function to load Molstar script and initialize
+        function loadMolstar() {
+            return new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = './molstar.min.js';
+                script.onload = () => {
+                    console.log('Molstar script loaded successfully');
+                    resolve();
+                };
+                script.onerror = () => {
+                    console.error('Failed to load Molstar script');
+                    reject(new Error('Failed to load Molstar script'));
+                };
+                document.head.appendChild(script);
+            });
+        }
+        
+        async function initViewer() {
+            try {
+                document.getElementById('status').textContent = 'Loading Molstar library...';
+                
+                // Wait for Molstar to load
+                await loadMolstar();
+                
+                // Wait a bit more to ensure molstar object is available
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                if (typeof molstar === 'undefined') {
+                    throw new Error('Molstar library not available');
+                }
+                
+                document.getElementById('status').textContent = 'Initializing viewer...';
+                
+                viewer = await molstar.Viewer.create('molstar-container', {
+                    layoutIsExpanded: false,
+                    layoutShowControls: true,
+                    layoutShowRemoteState: false,
+                    layoutShowSequence: true,
+                    viewportShowExpand: true,
+                    viewportShowSelectionMode: true,
+                    viewportShowAnimation: true
+                });
+                
+                document.getElementById('status').textContent = 'Ready!';
+                document.getElementById('status').className = 'success';
+                
+                setupEventHandlers();
+            } catch (error) {
+                document.getElementById('status').textContent = 'Failed to initialize: ' + error.message;
+                document.getElementById('status').className = 'error';
+                console.error('Initialization error:', error);
+            }
+        }
+        
+        function setupEventHandlers() {
+            document.getElementById('load-example').addEventListener('click', loadExampleStructure);
+            document.getElementById('load-pdb').addEventListener('click', loadPDBStructure);
+            document.getElementById('file-input').addEventListener('change', handleFileUpload);
+        }
+        
+        async function loadExampleStructure() {
+            if (!viewer) return;
+            
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = 'Loading example structure...';
+            statusEl.className = '';
+            
+            // Simple PDB content for a small peptide
+            const pdbContent = `HEADER    EXAMPLE PEPTIDE                         01-JAN-24   EXAM            
+TITLE     SIMPLE DIPEPTIDE EXAMPLE                                                
+ATOM      1  N   ALA A   1      -0.626   1.349   0.000  1.00 20.00           N  
+ATOM      2  CA  ALA A   1       0.000   0.000   0.000  1.00 20.00           C  
+ATOM      3  C   ALA A   1       1.520   0.000   0.000  1.00 20.00           C  
+ATOM      4  O   ALA A   1       2.126   0.000   1.062  1.00 20.00           O  
+ATOM      5  CB  ALA A   1      -0.507  -0.774  -1.219  1.00 20.00           C  
+ATOM      6  N   GLY A   2       2.068   0.000  -1.213  1.00 20.00           N  
+ATOM      7  CA  GLY A   2       3.500   0.000  -1.213  1.00 20.00           C  
+ATOM      8  C   GLY A   2       4.047   0.000  -2.625  1.00 20.00           C  
+ATOM      9  O   GLY A   2       3.340   0.000  -3.625  1.00 20.00           O  
+TER                                                                             
+END                                                                             `;
+            
+            try {
+                const data = await viewer.builders.data.rawData({ data: pdbContent });
+                const trajectory = await viewer.builders.structure.parseTrajectory(data, 'pdb');
+                const model = await viewer.builders.structure.createModel(trajectory);
+                const structure = await viewer.builders.structure.createStructure(model);
+                
+                const component = await viewer.builders.structure.representation.addRepresentation(structure, {
+                    type: 'cartoon',
+                    color: 'chain-id'
+                });
+                
+                await viewer.builders.camera.focusLoci(structure.loci);
+                
+                statusEl.textContent = 'Example structure loaded!';
+                statusEl.className = 'success';
+            } catch (error) {
+                statusEl.textContent = 'Error loading example: ' + error.message;
+                statusEl.className = 'error';
+                console.error('Example load error:', error);
+            }
+        }
+        
+        async function loadPDBStructure() {
+            if (!viewer) return;
+            
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = 'Loading PDB structure...';
+            statusEl.className = '';
+            
+            try {
+                const data = await viewer.builders.data.download({ url: 'https://files.rcsb.org/download/1CRN.pdb' });
+                const trajectory = await viewer.builders.structure.parseTrajectory(data, 'pdb');
+                const model = await viewer.builders.structure.createModel(trajectory);
+                const structure = await viewer.builders.structure.createStructure(model);
+                
+                const component = await viewer.builders.structure.representation.addRepresentation(structure, {
+                    type: 'cartoon',
+                    color: 'chain-id'
+                });
+                
+                await viewer.builders.camera.focusLoci(structure.loci);
+                
+                statusEl.textContent = 'PDB structure (1CRN) loaded!';
+                statusEl.className = 'success';
+            } catch (error) {
+                statusEl.textContent = 'Error loading PDB: ' + error.message;
+                statusEl.className = 'error';
+                console.error('PDB load error:', error);
+            }
+        }
+        
+        async function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file || !viewer) return;
+            
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = `Loading ${file.name}...`;
+            statusEl.className = '';
+            
+            try {
+                const content = await file.text();
+                const extension = file.name.split('.').pop().toLowerCase();
+                
+                let format = 'pdb';
+                if (extension === 'cif' || extension === 'mmcif') {
+                    format = 'mmcif';
+                }
+                
+                const data = await viewer.builders.data.rawData({ data: content });
+                const trajectory = await viewer.builders.structure.parseTrajectory(data, format);
+                const model = await viewer.builders.structure.createModel(trajectory);
+                const structure = await viewer.builders.structure.createStructure(model);
+                
+                const component = await viewer.builders.structure.representation.addRepresentation(structure, {
+                    type: 'cartoon',
+                    color: 'chain-id'
+                });
+                
+                await viewer.builders.camera.focusLoci(structure.loci);
+                
+                statusEl.textContent = `${file.name} loaded successfully!`;
+                statusEl.className = 'success';
+            } catch (error) {
+                statusEl.textContent = `Error loading ${file.name}: ${error.message}`;
+                statusEl.className = 'error';
+                console.error('File load error:', error);
+            }
+        }
+        
+        // Initialize when page loads
+        window.addEventListener('load', initViewer);
+    </script>
+</body>
+</html>
